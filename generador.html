@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Generador de enlaces · justificante de asistencia</title>
+<style>
+  :root { --azul:#1c3d6e; --azul2:#2b5b9c; --gris:#5a6675; --linea:#cbd3dd; --fondo:#f4f6f9; }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:22px 14px 44px; background:var(--fondo); color:#1f2733;
+         font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif; }
+  .tarjeta { max-width:720px; margin:0 auto 16px; background:#fff; border:1px solid var(--linea);
+             border-top:4px solid var(--azul); padding:24px 26px 26px; }
+  h1 { font-size:19px; color:var(--azul); margin:0 0 4px; }
+  .sub { color:var(--gris); font-size:13px; margin-bottom:20px; line-height:1.5; }
+  h2 { font-size:13px; color:var(--azul); margin:0 0 14px; text-transform:uppercase; letter-spacing:.6px; }
+  label { display:block; font-size:12.5px; font-weight:600; color:var(--azul); margin-bottom:5px; }
+  input, select, textarea { width:100%; padding:9px 10px; font-size:14.5px; border:1px solid var(--linea);
+          border-radius:2px; font-family:inherit; color:#1f2733; background:#fff; }
+  textarea { resize:vertical; font-size:13px; line-height:1.5; }
+  input:focus, select:focus, textarea:focus { outline:2px solid var(--azul2); outline-offset:-1px; }
+  .rejilla { display:grid; grid-template-columns:1fr 1fr; gap:13px 16px; }
+  .ancho { grid-column:1 / -1; }
+  .acciones { display:flex; gap:9px; align-items:center; margin-top:18px; flex-wrap:wrap; }
+  button { font:inherit; cursor:pointer; border-radius:2px; padding:9px 16px; }
+  .primario { background:var(--azul); color:#fff; border:1px solid var(--azul); font-weight:600; }
+  .secundario { background:#fff; color:var(--azul); border:1px solid var(--linea); }
+  .error { color:#8c1d1d; font-size:13px; margin-top:12px; min-height:18px; }
+  .resultado { border:1px solid #b9d3bb; background:#f3f9f4; padding:15px 17px; margin-top:6px; }
+  .resultado h3 { margin:0 0 10px; font-size:14px; color:#1f5b2b; }
+  .mono { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11.5px; word-break:break-all; color:#3b4655; }
+  .nota { font-size:12.5px; color:var(--gris); margin-top:14px; line-height:1.55; }
+  .oculto { display:none !important; }
+  ul.hist { list-style:none; margin:0; padding:0; font-size:13px; }
+  ul.hist li { display:flex; gap:10px; align-items:center; border-bottom:1px solid #e8edf2; padding:7px 0; }
+  ul.hist .f { color:var(--gris); font-variant-numeric:tabular-nums; min-width:88px; }
+  ul.hist .c { flex:1; }
+  ul.hist button { padding:4px 10px; font-size:12px; }
+  @media (max-width:560px){ .rejilla{grid-template-columns:1fr;} }
+</style>
+</head>
+<body>
+
+<div class="tarjeta">
+  <h1>Generador de enlaces</h1>
+  <div class="sub">Rellena los datos de la sesión y obtienes el enlace que se manda a los estudiantes.
+    Ese enlace ya lleva el curso, la fecha y la modalidad dentro: el estudiante solo escribe sus datos y firma.</div>
+
+  <div class="rejilla">
+    <div class="ancho"><label for="curso">Acción formativa</label>
+      <input id="curso" placeholder="Metacognición y atención sostenida en el aula" autocomplete="off"></div>
+    <div><label for="fecha">Fecha de la sesión</label><input id="fecha" type="date"></div>
+    <div><label for="modalidad">Modalidad</label>
+      <select id="modalidad">
+        <option value="En línea">En línea</option>
+        <option value="Presencial">Presencial</option>
+        <option value="Mixta">Mixta</option>
+        <option value="">(no indicar)</option>
+      </select></div>
+    <div><label for="lugar">Lugar / plataforma (opcional)</label>
+      <input id="lugar" placeholder="Zoom · sala 3" autocomplete="off"></div>
+    <div><label for="docente">Docente (opcional)</label>
+      <input id="docente" placeholder="Nombre del docente" autocomplete="off"></div>
+    <div class="ancho"><label for="base">Dirección de la página</label>
+      <input id="base" autocomplete="off"></div>
+  </div>
+  <div class="acciones">
+    <button type="button" class="primario" id="generar">Generar enlace</button>
+    <button type="button" class="secundario" id="abrir">Abrir como alumno</button>
+  </div>
+  <div class="error" id="error"></div>
+</div>
+
+<div class="tarjeta oculto" id="caja">
+  <h2>Enlace de la sesión</h2>
+  <div class="resultado">
+    <h3 id="resumen"></h3>
+    <div class="mono" id="url"></div>
+    <div class="acciones">
+      <button type="button" class="primario" id="copiar-url">Copiar enlace</button>
+      <button type="button" class="secundario" id="copiar-msg">Copiar mensaje para enviar</button>
+    </div>
+  </div>
+  <label for="mensaje" style="margin-top:16px">Mensaje listo para pegar</label>
+  <textarea id="mensaje" rows="5" readonly></textarea>
+  <div class="nota">
+    Envíalo por el canal de la clase (Moodle, correo, Teams, WhatsApp). Si prefieres recoger los PDF en
+    Moodle, crea una tarea de tipo «entrega de archivo» y pídeles que suban ahí el justificante: así ves
+    quién ha entregado y quién no, sin contar mensajes.
+  </div>
+</div>
+
+<div class="tarjeta">
+  <h2>Últimos enlaces</h2>
+  <ul class="hist" id="hist"></ul>
+  <div class="nota" id="hist-vacio">Todavía no has generado ningún enlace en este navegador.</div>
+  <div class="acciones"><button type="button" class="secundario" id="borrar">Borrar historial</button></div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+  var CLAVE = "parte_enlaces_v1";
+
+  function isoLocal(d){
+    var m = d.getMonth() + 1, dia = d.getDate();
+    return d.getFullYear() + "-" + (m < 10 ? "0" : "") + m + "-" + (dia < 10 ? "0" : "") + dia;
+  }
+  var MESES = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto",
+               "septiembre","octubre","noviembre","diciembre"];
+  function fechaLarga(iso){
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+    if (!m) return iso;
+    return parseInt(m[3],10) + " de " + MESES[parseInt(m[2],10)-1] + " de " + m[1];
+  }
+  function esc(s){
+    return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  }
+
+  // dirección de la página del alumno (index.html en el mismo directorio)
+  function basePorDefecto(){
+    var u = window.location.href.split("?")[0].split("#")[0];
+    return u.replace(/[^\/]*$/, "") + "index.html";
+  }
+
+  var ultimo = null;
+
+  function generar(){
+    var curso = $("curso").value.trim();
+    var fecha = $("fecha").value;
+    var err = $("error");
+    err.textContent = "";
+    if (!curso) { err.textContent = "Escribe el nombre de la acción formativa."; return null; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) { err.textContent = "Indica la fecha de la sesión."; return null; }
+    var base = $("base").value.trim();
+    if (!/^https?:\/\//.test(base) && base.indexOf("file://") !== 0) {
+      err.textContent = "La dirección de la página debe empezar por https:// (o file:// si la abres del disco).";
+      return null;
+    }
+
+    var q = new URLSearchParams();
+    q.set("curso", curso);
+    q.set("fecha", fecha);
+    if ($("modalidad").value) q.set("modalidad", $("modalidad").value);
+    if ($("lugar").value.trim()) q.set("lugar", $("lugar").value.trim());
+    if ($("docente").value.trim()) q.set("docente", $("docente").value.trim());
+    var url = base.replace(/\/index\.html$/, "/") + "?" + q.toString();
+
+    var modalidad = $("modalidad").value || "";
+    var mensaje =
+      "Hola: para justificar la asistencia a la sesión del " + fechaLarga(fecha) +
+      (modalidad ? " (" + modalidad.toLowerCase() + ")" : "") + ", abre este enlace, rellena tus datos, " +
+      "firma en el recuadro con el dedo o con el ratón y envíame por aquí el PDF que se descarga al pulsar " +
+      "el botón:\n\n" + url + "\n\nGracias.";
+
+    ultimo = { curso: curso, fecha: fecha, modalidad: modalidad, url: url, mensaje: mensaje };
+    $("resumen").textContent = curso + " · " + fechaLarga(fecha) + (modalidad ? " · " + modalidad : "");
+    $("url").textContent = url;
+    $("mensaje").value = mensaje;
+    $("caja").classList.remove("oculto");
+    guardarHistorial(ultimo);
+    return ultimo;
+  }
+
+  function leerHistorial(){
+    try { return JSON.parse(localStorage.getItem(CLAVE) || "[]"); } catch (e) { return []; }
+  }
+  function guardarHistorial(item){
+    try {
+      var h = leerHistorial().filter(function(x){ return x.url !== item.url; });
+      h.unshift(item);
+      localStorage.setItem(CLAVE, JSON.stringify(h.slice(0, 10)));
+    } catch (e) {}
+    pintarHistorial();
+  }
+  function pintarHistorial(){
+    var h = leerHistorial(), ul = $("hist");
+    ul.innerHTML = "";
+    h.forEach(function(x, i){
+      var li = document.createElement("li");
+      li.innerHTML = '<span class="f">' + esc(x.fecha) + '</span><span class="c">' +
+                     esc(x.curso) + (x.modalidad ? " · " + esc(x.modalidad) : "") + '</span>' +
+                     '<button type="button" class="secundario" data-i="' + i + '">Copiar</button>';
+      ul.appendChild(li);
+    });
+    $("hist-vacio").style.display = h.length ? "none" : "block";
+    $("borrar").style.display = h.length ? "" : "none";
+  }
+
+  function copiar(texto, boton){
+    function hecho(){ if (boton) { var t = boton.textContent; boton.textContent = "Copiado"; setTimeout(function(){ boton.textContent = t; }, 1400); } }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(texto).then(hecho).catch(function(){ seleccionar(texto, boton); });
+    } else seleccionar(texto, boton);
+  }
+  function seleccionar(texto, boton){
+    var t = document.createElement("textarea");
+    t.value = texto; document.body.appendChild(t); t.select();
+    try { document.execCommand("copy"); } catch (e) {}
+    t.remove();
+    if (boton) { boton.textContent = "Copiado"; }
+  }
+
+  $("generar").addEventListener("click", generar);
+  $("abrir").addEventListener("click", function(){
+    var r = ultimo || generar();
+    if (r) window.open(r.url, "_blank", "noopener");
+  });
+  $("copiar-url").addEventListener("click", function(){ if (ultimo) copiar(ultimo.url, this); });
+  $("copiar-msg").addEventListener("click", function(){ if (ultimo) copiar(ultimo.mensaje, this); });
+  document.addEventListener("click", function(ev){
+    var b = ev.target.closest ? ev.target.closest("[data-i]") : null;
+    if (!b) return;
+    var h = leerHistorial(), x = h[parseInt(b.getAttribute("data-i"), 10)];
+    if (x) copiar(x.url, b);
+  });
+  $("borrar").addEventListener("click", function(){
+    try { localStorage.removeItem(CLAVE); } catch (e) {}
+    pintarHistorial();
+  });
+
+  $("base").value = basePorDefecto();
+  $("fecha").value = isoLocal(new Date());
+  pintarHistorial();
+
+  window.__gen = { generar: generar, isoLocal: isoLocal, fechaLarga: fechaLarga, base: basePorDefecto };
+})();
+</script>
+</body>
+</html>

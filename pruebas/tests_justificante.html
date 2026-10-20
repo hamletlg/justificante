@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="es"><meta charset="utf-8"><title>harness justificante</title>
+<style>body{font-family:monospace;font-size:12px} iframe{width:740px;height:900px;border:1px solid #ccc}
+#pdf64{display:none}</style>
+<pre id="out">pendiente</pre>
+<div id="pdf64"></div>
+<iframe id="frm"></iframe>
+<script>
+var out = document.getElementById("out"), log = [];
+function L(s){ log.push(s); out.textContent = log.join("\n"); }
+var PASS = 0, FAIL = 0;
+function chk(n, cond, extra){
+  if (cond) { PASS++; L("PASS " + n + (extra ? " :: " + extra : "")); }
+  else { FAIL++; L("FAIL " + n + (extra ? " :: " + extra : "")); }
+}
+function esperar(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
+
+function iso(d){
+  var m = d.getMonth()+1, x = d.getDate();
+  return d.getFullYear()+"-"+(m<10?"0":"")+m+"-"+(x<10?"0":"")+x;
+}
+var HOY = iso(new Date());
+var AYER = iso(new Date(Date.now() - 86400000));
+
+var Q = "?curso=" + encodeURIComponent("Metacognición y atención sostenida en el aula") +
+        "&fecha=" + AYER +
+        "&modalidad=" + encodeURIComponent("En línea") +
+        "&lugar=" + encodeURIComponent("Zoom · sala 3") +
+        "&docente=" + encodeURIComponent("Docente Prueba");
+var frm = document.getElementById("frm");
+
+function cargar(src){
+  return new Promise(function(res){
+    frm.onload = function(){ setTimeout(res, 280); };
+    frm.src = src;
+  });
+}
+function pintar(w, d){
+  var c = d.getElementById("firma"), r = c.getBoundingClientRect();
+  var o = { bubbles:true, cancelable:true, pointerId:1, pointerType:"mouse", isPrimary:true };
+  function ev(t, x, y){ c.dispatchEvent(new w.PointerEvent(t, Object.assign({}, o, { clientX:r.left+x, clientY:r.top+y }))); }
+  ev("pointerdown", 130, 120);
+  [[150,100],[178,72],[208,108],[238,66],[268,102],[298,62],[328,100],[358,70],[390,104],[420,78]]
+    .forEach(function(p){ ev("pointermove", p[0], p[1]); });
+  ev("pointerup", 420, 78);
+}
+function firmar(w, d, nombre, apellidos, dni, conTrazo){
+  d.getElementById("nombre").value = nombre;
+  d.getElementById("apellidos").value = apellidos;
+  d.getElementById("dni").value = dni;
+  if (conTrazo) pintar(w, d);
+  d.getElementById("f").dispatchEvent(new w.Event("submit", { cancelable:true, bubbles:true }));
+}
+function b64De(u8){
+  var s = "", tro = 0x8000;
+  for (var i = 0; i < u8.length; i += tro) s += String.fromCharCode.apply(null, u8.subarray(i, i + tro));
+  return btoa(s);
+}
+
+async function correr(){
+  var w = frm.contentWindow, d = frm.contentDocument;
+  chk("pagina cargada", !!d.getElementById("f"));
+  var app = w.__app;
+  chk("app expuesta", !!app);
+
+  // 1) parámetros de la sesión
+  var s = app.sesion();
+  chk("lee curso del enlace", s.curso === "Metacognición y atención sostenida en el aula", s.curso);
+  chk("lee fecha del enlace (ayer)", s.fecha === AYER, s.fecha);
+  chk("lee modalidad", s.modalidad === "En línea", s.modalidad);
+  chk("lee docente", s.docente === "Docente Prueba", s.docente);
+  chk("fecha en palabras", app.fechaLarga("2026-10-20") === "20 de octubre de 2026", app.fechaLarga("2026-10-20"));
+  chk("cabecera con modalidad", /Modalidad/.test(d.getElementById("sesion").textContent), "");
+  chk("no pide curso al alumno", !d.getElementById("curso"), "solo nombre, apellidos, DNI y firma");
+
+  // 2) aviso de fecha: la sesión es de ayer
+  chk("avisa de que firma en otra fecha", /Está firmando el/.test(d.getElementById("sesion").textContent),
+      (d.getElementById("sesion").textContent.match(/Está firmando[^.]*/) || [""])[0]);
+
+  // 3) errores
+  var cap = null, orig = w.URL.createObjectURL;
+  w.URL.createObjectURL = function(b){ cap = b; return "blob:cap"; };
+
+  firmar(w, d, "María", "Muñoz Peña", "12345678A", true);
+  await esperar(120);
+  chk("rechaza DNI con letra errónea", /DNI o NIE no v.lido/.test(d.getElementById("error").textContent),
+      d.getElementById("error").textContent);
+  chk("no genera PDF con DNI erróneo", cap === null, "");
+
+  d.getElementById("limpiar").click();
+  firmar(w, d, "María", "Muñoz Peña", "12345678Z", false);
+  await esperar(120);
+  chk("rechaza firma vacía", /Falta la firma/.test(d.getElementById("error").textContent),
+      d.getElementById("error").textContent);
+  chk("no genera PDF sin trazo", cap === null, "");
+
+  // 4) caso correcto
+  firmar(w, d, "María", "Muñoz Peña", "12345678Z", true);
+  await esperar(300);
+  w.URL.createObjectURL = orig;
+  chk("genera el PDF", !!cap, cap ? cap.type + " " + cap.size + " B" : "sin blob");
+  chk("el recibo se muestra", d.getElementById("recibo").className.indexOf("oculto") === -1, "");
+  chk("el recibo trae la firma",
+      !!d.querySelector("#recibo img") && /^data:image\/png/.test(d.querySelector("#recibo img").src), "");
+
+  var u = app.ultimo();
+  chk("nombre de fichero", /^Justificante-\d{4}-\d{2}-\d{2}-MUNOZ-PENA\.pdf$/.test(u.fichero), u.fichero);
+  chk("el fichero lleva la fecha de la sesión", u.fichero.indexOf(AYER) > -1, u.fichero);
+  chk("hash del registro 64 hex", /^[0-9a-f]{64}$/.test(u.datos.regSha), u.datos.regSha);
+  chk("hash de la imagen 64 hex", /^[0-9a-f]{64}$/.test(u.datos.imgSha), u.datos.imgSha);
+  chk("la firma se fecha HOY, no con la fecha de la sesión",
+      u.datos.fechaHora.indexOf(app.fechaLarga(HOY)) === 0, u.datos.fechaHora);
+  chk("el PDF lleva la modalidad", u.datos.modalidad === "En línea", u.datos.modalidad);
+  chk("canónico con fecha_firma y fecha_sesion",
+      /"fecha_firma":"\d{4}-\d{2}-\d{2}"/.test(u.datos.canon) && /"fecha_sesion"/.test(u.datos.canon),
+      u.datos.canon);
+
+  if (cap) {
+    var u8 = new Uint8Array(await cap.arrayBuffer());
+    chk("empieza por %PDF", u8[0] === 0x25 && u8[1] === 0x50 && u8[2] === 0x44 && u8[3] === 0x46,
+        String.fromCharCode(u8[0], u8[1], u8[2], u8[3]));
+    chk("termina en %%EOF",
+        /%%EOF\s*$/.test(String.fromCharCode.apply(null, u8.subarray(u8.length - 10))), 
+        JSON.stringify(String.fromCharCode.apply(null, u8.subarray(u8.length - 10))));
+    L("DATA_PDF_SIZE " + u8.length);
+    L("DATA_REG_SHA " + u.datos.regSha);
+    L("DATA_CANON " + u.datos.canon);
+    L("DATA_HOY " + HOY);
+    L("DATA_AYER " + AYER);
+    document.getElementById("pdf64").textContent = b64De(u8);
+  }
+
+  // 5) generador de enlaces
+  var g = document.createElement("iframe");
+  g.style.width = "740px"; g.style.height = "700px";
+  document.body.appendChild(g);
+  await new Promise(function(res){ g.onload = function(){ setTimeout(res, 350); }; g.src = "../generador.html"; });
+  var gw = g.contentWindow, gd = g.contentDocument;
+  chk("generador cargado", !!gd.getElementById("generar"), "");
+  gd.getElementById("curso").value = "Curso de prueba";
+  gd.getElementById("fecha").value = "2026-11-05";
+  gd.getElementById("modalidad").value = "En línea";
+  gd.getElementById("lugar").value = "Zoom";
+  gd.getElementById("docente").value = "Docente";
+  gd.getElementById("generar").click();
+  await esperar(150);
+  var r = gw.__gen.generar();
+  chk("genera enlace", !!(r && /\?curso=/.test(r.url)), r ? r.url : "sin url");
+  if (r) {
+    var q = new URLSearchParams(r.url.split("?")[1]);
+    chk("enlace: curso", q.get("curso") === "Curso de prueba", q.get("curso"));
+    chk("enlace: fecha", q.get("fecha") === "2026-11-05", q.get("fecha"));
+    chk("enlace: modalidad con tilde", q.get("modalidad") === "En línea", q.get("modalidad"));
+    chk("mensaje listo para enviar", /firma en el recuadro/.test(r.mensaje) && r.mensaje.indexOf(r.url) > -1, "");
+    L("DATA_GEN_URL " + r.url);
+    await cargar(r.url.replace(/^[^?]*/, "../index.html"));
+    var w2 = frm.contentWindow;
+    chk("el enlace generado abre su sesión",
+        w2.__app.sesion().curso === "Curso de prueba" && w2.__app.sesion().fecha === "2026-11-05",
+        JSON.stringify(w2.__app.sesion()));
+  }
+
+  L("RESUMEN PASS=" + PASS + " FAIL=" + FAIL);
+  document.title = "PASS=" + PASS + " FAIL=" + FAIL;
+}
+
+frm.onload = function(){
+  setTimeout(function(){ correr().catch(function(e){ L("EXCEPCION " + (e && e.message)); L("RESUMEN PASS=" + PASS + " FAIL=" + FAIL); }); }, 300);
+};
+frm.src = "../index.html" + Q;
+</script>
+</html>

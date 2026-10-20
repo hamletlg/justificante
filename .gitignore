@@ -1,0 +1,11 @@
+# secretos y credenciales: nunca al repositorio
+token*.txt
+*.token
+.env
+.env.*
+*askpass*
+
+# temporales de pruebas
+dom*.html
+*.log
+__pycache__/

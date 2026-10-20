@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Justificante de asistencia</title>
+<style>
+  :root { --azul:#1c3d6e; --azul2:#2b5b9c; --gris:#5a6675; --linea:#cbd3dd; --fondo:#f4f6f9; }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:20px 14px 44px; background:var(--fondo); color:#1f2733;
+         font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif; }
+  .tarjeta { max-width:640px; margin:0 auto 16px; background:#fff; border:1px solid var(--linea);
+             border-top:4px solid var(--azul); padding:22px 24px 24px; }
+  h1 { font-size:19px; color:var(--azul); margin:0 0 4px; }
+  .sub { color:var(--gris); font-size:13px; margin-bottom:18px; }
+  .sesion { border:1px solid var(--linea); background:#f8fafc; padding:11px 13px; margin-bottom:18px;
+            font-size:13.5px; line-height:1.55; }
+  .sesion b { color:var(--azul); font-weight:600; }
+  label { display:block; font-size:12.5px; font-weight:600; color:var(--azul); margin-bottom:5px; }
+  input { width:100%; padding:9px 10px; font-size:15px; border:1px solid var(--linea);
+          border-radius:2px; font-family:inherit; color:#1f2733; background:#fff; }
+  input:focus { outline:2px solid var(--azul2); outline-offset:-1px; }
+  .rejilla { display:grid; grid-template-columns:1fr 1fr; gap:13px 16px; }
+  .ancho { grid-column:1 / -1; }
+  .caja-firma { border:1px solid var(--linea); background:#fff; position:relative; }
+  canvas { display:block; width:100%; height:180px; touch-action:none; cursor:crosshair; }
+  .pista { position:absolute; left:12px; bottom:9px; font-size:12px; color:#9aa5b1; pointer-events:none; }
+  .pista.oculta { display:none; }
+  .acciones { display:flex; gap:9px; align-items:center; margin-top:17px; flex-wrap:wrap; }
+  button { font:inherit; cursor:pointer; border-radius:2px; padding:10px 17px; }
+  .primario { background:var(--azul); color:#fff; border:1px solid var(--azul); font-weight:600; }
+  .primario:disabled { opacity:.55; cursor:not-allowed; }
+  .secundario { background:#fff; color:var(--azul); border:1px solid var(--linea); }
+  .error { color:#8c1d1d; font-size:13px; margin-top:12px; min-height:18px; }
+  .recibo { border:1px solid #b9d3bb; background:#f3f9f4; padding:16px 18px; margin-top:6px; }
+  .recibo h2 { margin:0 0 10px; font-size:15px; color:#1f5b2b; }
+  .recibo .fila { font-size:13.5px; margin:3px 0; }
+  .recibo .mono { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11px;
+                  word-break:break-all; color:#3b4655; }
+  .recibo .trazo { border:1px solid var(--linea); background:#fff; margin:10px 0; padding:4px; text-align:center; }
+  .recibo .trazo img { max-height:110px; max-width:100%; }
+  .nota { font-size:12.5px; color:var(--gris); margin-top:14px; line-height:1.5; }
+  .oculto { display:none !important; }
+  @media (max-width:520px){ .rejilla{grid-template-columns:1fr;} }
+
+  /* vista de impresión: solo el recibo */
+  @media print {
+    @page { size:A4; margin:16mm 15mm; }
+    body { background:#fff; padding:0; }
+    .tarjeta, .nota { display:none !important; }
+    .recibo { display:block !important; border:0; background:#fff; padding:0; margin:0; }
+    .recibo h2 { font-size:15pt; color:#000; margin:0 0 2mm; }
+    .recibo .fila { font-size:10.5pt; }
+    .recibo .mono { font-size:7pt; }
+    .recibo .trazo img { max-height:38mm; }
+    .recibo button { display:none !important; }
+  }
+</style>
+</head>
+<body>
+
+<div class="tarjeta">
+  <h1>Justificante de asistencia</h1>
+  <div class="sub" id="sub">Rellene sus datos, firme y descargue el justificante en PDF</div>
+
+  <div class="sesion" id="sesion"></div>
+
+  <form id="f" novalidate>
+    <div class="rejilla">
+      <div><label for="nombre">Nombre</label><input id="nombre" autocomplete="given-name" required></div>
+      <div><label for="apellidos">Apellidos</label><input id="apellidos" autocomplete="family-name" required></div>
+      <div class="ancho"><label for="dni">DNI / NIE</label><input id="dni" placeholder="12345678Z" autocomplete="off" required></div>
+      <div class="ancho">
+        <label>Firma</label>
+        <div class="caja-firma">
+          <canvas id="firma" width="1200" height="360" aria-label="Recuadro de firma"></canvas>
+          <span class="pista" id="pista">Firme aquí con el dedo o con el ratón</span>
+        </div>
+      </div>
+    </div>
+    <div class="acciones">
+      <button type="submit" class="primario" id="enviar">Descargar justificante (PDF)</button>
+      <button type="button" class="secundario" id="limpiar">Borrar trazo</button>
+    </div>
+    <div class="error" id="error"></div>
+  </form>
+
+  <div class="recibo oculto" id="recibo"></div>
+
+  <div class="nota" id="nota">
+    El PDF se genera en su propio dispositivo: no se envía ni se guarda en ningún servidor.
+    Después, mándeselo a quien le indicó el enlace (WhatsApp o correo).
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+
+  /* ================= datos de la sesión (por parámetros de la URL) ================= */
+  function leerParams(){
+    var p = {}, q = window.location.search.replace(/^\?/, "").split("&");
+    q.forEach(function(par){
+      if (!par) return;
+      var i = par.indexOf("=");
+      var k = decodeURIComponent(i < 0 ? par : par.slice(0, i));
+      var v = i < 0 ? "" : decodeURIComponent(par.slice(i + 1).replace(/\+/g, " "));
+      p[k] = v;
+    });
+    return p;
+  }
+
+  var P = leerParams();
+  var hoy = new Date();
+  var MESES = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto",
+               "septiembre","octubre","noviembre","diciembre"];
+
+  // fecha local en ISO (toISOString usa UTC: de madrugada daría el día anterior)
+  function isoLocal(d){
+    var m = d.getMonth() + 1, dia = d.getDate();
+    return d.getFullYear() + "-" + (m < 10 ? "0" : "") + m + "-" + (dia < 10 ? "0" : "") + dia;
+  }
+
+  var SESION = {
+    curso: (P.curso || "").trim(),
+    fecha: (P.fecha || isoLocal(hoy)).trim(),
+    lugar: (P.lugar || "").trim(),
+    docente: (P.docente || P.profesor || "").trim(),
+    modalidad: (P.modalidad || "").trim()
+  };
+
+  function fechaLarga(iso){
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+    if (!m) return iso;
+    return parseInt(m[3], 10) + " de " + MESES[parseInt(m[2], 10) - 1] + " de " + m[1];
+  }
+
+  function pintarSesion(){
+    var filas = [];
+    if (SESION.curso) filas.push("<b>Acción formativa:</b> " + esc(SESION.curso));
+    filas.push("<b>Fecha:</b> " + esc(fechaLarga(SESION.fecha)));
+    if (SESION.modalidad) filas.push("<b>Modalidad:</b> " + esc(SESION.modalidad));
+    if (SESION.lugar) filas.push("<b>Lugar:</b> " + esc(SESION.lugar));
+    if (SESION.docente) filas.push("<b>Docente:</b> " + esc(SESION.docente));
+    if (!SESION.curso) filas.push("<b>Acción formativa:</b> (pendiente de definir en el enlace)");
+    var aviso = "";
+    if (isoLocal(new Date()) !== SESION.fecha) {
+      aviso = '<div style="margin-top:9px;padding:8px 10px;background:#fff6e5;border-left:3px solid #c98a1a;' +
+              'font-size:12.5px;color:#6b4b08">Está firmando el <b>' + esc(fechaLarga(isoLocal(new Date()))) +
+              '</b>, y esta sesión es del <b>' + esc(fechaLarga(SESION.fecha)) +
+              '</b>. En el justificante quedará la fecha real de la firma.</div>';
+    }
+    $("sesion").innerHTML = filas.join("<br>") + aviso;
+    $("sub").textContent = "Rellene sus datos, firme y descargue el justificante en PDF";
+  }
+
+  function esc(s){
+    return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  }
+
+  /* ================= SHA-256 en JS puro ================= */
+  var K = new Uint32Array([
+    0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2]);
+  function rotr(x,n){ return (x >>> n) | (x << (32 - n)); }
+  function sha256Bytes(data){
+    var l = data.length, total = (((l + 9) + 63) >> 6) << 6;
+    var buf = new Uint8Array(total);
+    buf.set(data);
+    buf[l] = 0x80;
+    var dv = new DataView(buf.buffer);
+    dv.setUint32(total - 8, Math.floor(l / 536870912) >>> 0);
+    dv.setUint32(total - 4, (l << 3) >>> 0);
+    var H = new Uint32Array([0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+                             0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19]);
+    var w = new Uint32Array(64);
+    for (var off = 0; off < total; off += 64) {
+      for (var i = 0; i < 16; i++) w[i] = dv.getUint32(off + i * 4);
+      for (i = 16; i < 64; i++) {
+        var s0 = rotr(w[i-15],7) ^ rotr(w[i-15],18) ^ (w[i-15] >>> 3);
+        var s1 = rotr(w[i-2],17) ^ rotr(w[i-2],19) ^ (w[i-2] >>> 10);
+        w[i] = (w[i-16] + s0 + w[i-7] + s1) >>> 0;
+      }
+      var a=H[0],b=H[1],c=H[2],d=H[3],e=H[4],f=H[5],g=H[6],h=H[7];
+      for (i = 0; i < 64; i++) {
+        var S1 = rotr(e,6) ^ rotr(e,11) ^ rotr(e,25);
+        var ch = (e & f) ^ (~e & g);
+        var t1 = (h + S1 + ch + K[i] + w[i]) >>> 0;
+        var S0 = rotr(a,2) ^ rotr(a,13) ^ rotr(a,22);
+        var maj = (a & b) ^ (a & c) ^ (b & c);
+        var t2 = (S0 + maj) >>> 0;
+        h=g; g=f; f=e; e=(d+t1)>>>0; d=c; c=b; b=a; a=(t1+t2)>>>0;
+      }
+      H[0]=(H[0]+a)>>>0; H[1]=(H[1]+b)>>>0; H[2]=(H[2]+c)>>>0; H[3]=(H[3]+d)>>>0;
+      H[4]=(H[4]+e)>>>0; H[5]=(H[5]+f)>>>0; H[6]=(H[6]+g)>>>0; H[7]=(H[7]+h)>>>0;
+    }
+    var out = new Uint8Array(32), odv = new DataView(out.buffer);
+    for (i = 0; i < 8; i++) odv.setUint32(i * 4, H[i]);
+    return out;
+  }
+  function toHex(u8){ var s = ""; for (var i = 0; i < u8.length; i++) s += (u8[i] < 16 ? "0" : "") + u8[i].toString(16); return s; }
+  function sha256Text(str){ return toHex(sha256Bytes(new TextEncoder().encode(str))); }
+  function b64ToBytes(b64){ var bin = atob(b64), u = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; }
+
+  /* ================= DNI / NIE ================= */
+  var LETRAS = "TRWAGMYFPDXBNJZSQVHLCKE";
+  function dniOk(v){
+    var s = (v || "").trim().toUpperCase();
+    var m = /^(\d{8})([A-Z])$/.exec(s);
+    if (m) return LETRAS[parseInt(m[1], 10) % 23] === m[2];
+    var n = /^([XYZ])(\d{7})([A-Z])$/.exec(s);
+    if (n) {
+      var d = (n[1] === "X" ? "0" : n[1] === "Y" ? "1" : "2") + n[2];
+      return LETRAS[parseInt(d, 10) % 23] === n[3];
+    }
+    return false;
+  }
+
+  /* ================= generador de PDF (sin librerías) ================= */
+  var WIN = { "€":0x80,"–":0x96,"—":0x97,"‘":0x91,"’":0x92,"“":0x93,"”":0x94,
+              "·":0xB7,"º":0xBA,"ª":0xAA,"«":0xAB,"»":0xBB,"…":0x85,"á":0xE1,"é":0xE9,
+              "í":0xED,"ó":0xF3,"ú":0xFA,"ñ":0xF1,"Á":0xC1,"É":0xC9,"Í":0xCD,"Ó":0xD3,
+              "Ú":0xDA,"Ñ":0xD1,"ü":0xFC,"Ü":0xDC,"¿":0xBF,"¡":0xA1 };
+  function winansiByte(ch){
+    var c = ch.charCodeAt(0);
+    if (c < 128) return c;
+    if (WIN[ch] !== undefined) return WIN[ch];
+    return 63; // '?'
+  }
+  function pdfString(s){
+    var out = "";
+    for (var i = 0; i < s.length; i++) {
+      var ch = s[i], b = winansiByte(ch);
+      if (b === 40 || b === 41 || b === 92) out += "\\" + ch;   // ( ) \
+      else out += String.fromCharCode(b);
+    }
+    return "(" + out + ")";
+  }
+  function num(n){ return (Math.round(n * 100) / 100).toString(); }
+
+  function assemblarPDF(objs, info){
+    // objs: array de Uint8Array con el cuerpo de cada objeto (sin "N 0 obj")
+    var chunks = [], offsets = [], pos = 0;
+    function push(u8){ chunks.push(u8); pos += u8.length; }
+    function pushStr(s){ push(latin1(s)); }
+    function latin1(s){
+      var u = new Uint8Array(s.length);
+      for (var i = 0; i < s.length; i++) u[i] = s.charCodeAt(i) & 0xFF;
+      return u;
+    }
+    pushStr("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n");
+    objs.forEach(function(cuerpo, i){
+      offsets[i] = pos;
+      pushStr((i + 1) + " 0 obj\n");
+      push(cuerpo);
+      pushStr("\nendobj\n");
+    });
+    var xref = pos;
+    var n = objs.length + 1;
+    var t = "xref\n0 " + n + "\n0000000000 65535 f \n";
+    for (var i = 0; i < objs.length; i++) {
+      t += ("0000000000" + offsets[i]).slice(-10) + " 00000 n \n";
+    }
+    t += "trailer\n<< /Size " + n + " /Root 1 0 R /Info " + objs.length + " 0 R >>\nstartxref\n" +
+         xref + "\n%%EOF\n";
+    pushStr(t);
+    var total = 0;
+    chunks.forEach(function(c){ total += c.length; });
+    var outBytes = new Uint8Array(total), o = 0;
+    chunks.forEach(function(c){ outBytes.set(c, o); o += c.length; });
+    return outBytes;
+  }
+
+  function crearPDF(d){
+    var W = 595.28, H = 841.89, M = 50;
+    var c = [];
+    function txt(x, y, size, font, str){
+      c.push("BT /" + font + " " + num(size) + " Tf 1 0 0 1 " + num(x) + " " + num(y) +
+             " Tm " + pdfString(str) + " Tj ET");
+    }
+    function linea(x1, y1, x2, y2, g){
+      c.push(num(g) + " G " + num(g) + " w " + num(x1) + " " + num(y1) + " m " +
+             num(x2) + " " + num(y2) + " l S");
+    }
+    function caja(x, y, w, h, g){
+      c.push(num(g) + " G " + num(g) + " w " + num(x) + " " + num(y) + " " + num(w) + " " +
+             num(h) + " re S");
+    }
+    function envolver(str, size, maxW){
+      var palabras = String(str).split(/\s+/), lineas = [], actual = "";
+      var porChar = size * 0.52;
+      palabras.forEach(function(p){
+        var prueba = actual ? actual + " " + p : p;
+        if (prueba.length * porChar > maxW && actual) { lineas.push(actual); actual = p; }
+        else actual = prueba;
+      });
+      if (actual) lineas.push(actual);
+      return lineas;
+    }
+
+    // cabecera
+    txt(M, 770, 17, "F2", "Justificante de asistencia");
+    txt(M, 752, 9.5, "F1", "Documento generado en el dispositivo del asistente");
+    linea(M, 742, W - M, 742, 0.55);
+
+    // acción formativa (puede ocupar varias líneas)
+    var y = 716;
+    if (d.curso) {
+      txt(M, y + 12, 8, "F2", "ACCIÓN FORMATIVA");
+      var ls = envolver(d.curso, 12, W - 2 * M);
+      ls.forEach(function(l){ txt(M, y, 12, "F1", l); y -= 15; });
+      y -= 10;
+    }
+    txt(M, y, 10, "F2", "Fecha:  "); txt(M + 48, y, 10, "F1", d.fechaLarga);
+    y -= 16;
+    if (d.modalidad) { txt(M, y, 10, "F2", "Modalidad:  "); txt(M + 70, y, 10, "F1", d.modalidad); y -= 16; }
+    if (d.lugar) { txt(M, y, 10, "F2", "Lugar:  "); txt(M + 48, y, 10, "F1", d.lugar); y -= 16; }
+    if (d.docente) { txt(M, y, 10, "F2", "Docente:  "); txt(M + 60, y, 10, "F1", d.docente); y -= 16; }
+
+    // datos del asistente
+    y -= 18;
+    txt(M, y, 8, "F2", "DATOS DEL ASISTENTE");
+    y -= 18;
+    txt(M, y, 11, "F2", "Nombre y apellidos:  ");
+    txt(M + 132, y, 11, "F1", d.apellidos + ", " + d.nombre);
+    y -= 17;
+    txt(M, y, 11, "F2", "DNI / NIE:  ");
+    txt(M + 132, y, 11, "F1", d.dni);
+    y -= 17;
+    txt(M, y, 11, "F2", "Firmado (hora local):  ");
+    txt(M + 132, y, 11, "F1", d.fechaHora);
+
+    // recuadro de la firma
+    var cajaY = y - 180, cajaH = 165, cajaW = W - 2 * M;
+    caja(M, cajaY, cajaW, cajaH, 0.6);
+    txt(M + 8, cajaY + cajaH - 13, 7.5, "F1", "Firma del asistente");
+    var maxW = cajaW - 24, maxH = cajaH - 36;
+    var esc = Math.min(maxW / d.imgW, maxH / d.imgH);
+    var iw = d.imgW * esc, ih = d.imgH * esc;
+    var ix = M + (cajaW - iw) / 2;
+    var iy = (cajaY + 10) + ((cajaH - 36) - ih) / 2;   // centrada bajo la etiqueta
+    c.push("q " + num(iw) + " 0 0 " + num(ih) + " " + num(ix) + " " + num(iy) + " cm /Im1 Do Q");
+
+    // huellas
+    y = cajaY - 28;
+    txt(M, y, 8, "F2", "HUELLA SHA-256 DE LA IMAGEN DE LA FIRMA");
+    y -= 11;
+    txt(M, y, 7.5, "F3", d.imgSha);
+    y -= 15;
+    txt(M, y, 8, "F2", "HUELLA SHA-256 DEL REGISTRO");
+    y -= 11;
+    txt(M, y, 7.5, "F3", d.regSha);
+
+    // pie
+    var pie = [
+      "El registro incluye nombre, apellidos, DNI/NIE, fecha de la sesión, fecha y hora de la firma. La huella del",
+      "registro se calcula sobre esos datos junto con el SHA-256 de la imagen incrustada: cualquier modificación",
+      "posterior de un dato o de la imagen hace que deje de coincidir. Para comprobarla, extraiga la imagen del",
+      "PDF (pdfimages -j fichero.pdf salida) y recalcule su SHA-256."
+    ];
+    var py = 88;
+    linea(M, py + 12, W - M, py + 12, 0.6);
+    pie.forEach(function(l){ txt(M, py, 7.5, "F1", l); py -= 10; });
+
+    var contenido = c.join("\n");
+
+    // objetos
+    var objs = [];
+    objs.push(latin1Utf8("<< /Type /Catalog /Pages 2 0 R >>"));
+    objs.push(latin1Utf8("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"));
+    objs.push(latin1Utf8("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " + num(W) + " " + num(H) +
+      "] /Resources << /Font << /F1 4 0 R /F2 5 0 R /F3 6 0 R >> /XObject << /Im1 7 0 R >> >>" +
+      " /Contents 8 0 R >>"));
+    objs.push(latin1Utf8("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"));
+    objs.push(latin1Utf8("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>"));
+    objs.push(latin1Utf8("<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>"));
+
+    // imagen JPEG
+    var cabeza = latin1Utf8("<< /Type /XObject /Subtype /Image /Width " + d.imgW + " /Height " + d.imgH +
+      " /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length " + d.jpeg.length + " >>\nstream\n");
+    var cola = latin1Utf8("\nendstream");
+    var imgObj = new Uint8Array(cabeza.length + d.jpeg.length + cola.length);
+    imgObj.set(cabeza, 0); imgObj.set(d.jpeg, cabeza.length); imgObj.set(cola, cabeza.length + d.jpeg.length);
+    objs.push(imgObj);
+
+    // contenido
+    var contBytes = latin1Utf8(contenido);
+    var ccabeza = latin1Utf8("<< /Length " + contBytes.length + " >>\nstream\n");
+    var ccola = latin1Utf8("\nendstream");
+    var contObj = new Uint8Array(ccabeza.length + contBytes.length + ccola.length);
+    contObj.set(ccabeza, 0); contObj.set(contBytes, ccabeza.length); contObj.set(ccola, ccabeza.length + contBytes.length);
+    objs.push(contObj);
+
+    var ahora = new Date();
+    var dz = ahora.toISOString().replace(/[-:T]/g, "").slice(0, 14) + "Z";
+    objs.push(latin1Utf8("<< /Producer (Justificante de asistencia) /CreationDate (D:" + dz + ") >>"));
+
+    return assemblarPDF(objs, null);
+  }
+
+  function latin1Utf8(s){
+    var u = new Uint8Array(s.length);
+    for (var i = 0; i < s.length; i++) u[i] = s.charCodeAt(i) & 0xFF;
+    return u;
+  }
+
+  /* ================= canvas ================= */
+  var canvas = $("firma"), ctx = canvas.getContext("2d");
+  var pista = $("pista"), error = $("error");
+  var dibujando = false, puntos = 0;
+
+  function inicial(){
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = "#101820";
+    ctx.lineWidth = 3.2;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+  }
+  inicial();
+
+  function pos(ev){
+    var r = canvas.getBoundingClientRect();
+    return { x: (ev.clientX - r.left) * (canvas.width / r.width),
+             y: (ev.clientY - r.top) * (canvas.height / r.height) };
+  }
+  canvas.addEventListener("pointerdown", function(ev){
+    ev.preventDefault();
+    try { canvas.setPointerCapture(ev.pointerId); } catch (e) {}
+    dibujando = true; puntos = 0;
+    var p = pos(ev);
+    ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + 0.1, p.y + 0.1); ctx.stroke();
+    pista.classList.add("oculta");
+  });
+  canvas.addEventListener("pointermove", function(ev){
+    if (!dibujando) return;
+    ev.preventDefault();
+    var p = pos(ev);
+    ctx.lineTo(p.x, p.y); ctx.stroke();
+    puntos++;
+  });
+  function soltar(){ dibujando = false; }
+  canvas.addEventListener("pointerup", soltar);
+  canvas.addEventListener("pointercancel", soltar);
+  canvas.addEventListener("pointerleave", soltar);
+  $("limpiar").addEventListener("click", function(){
+    inicial(); puntos = 0; pista.classList.remove("oculta"); error.textContent = "";
+  });
+
+  function recortar(){
+    var W = canvas.width, H = canvas.height;
+    var d = ctx.getImageData(0, 0, W, H).data;
+    var minX = W, minY = H, maxX = -1, maxY = -1, cuenta = 0;
+    for (var y = 0; y < H; y++) {
+      for (var x = 0; x < W; x++) {
+        var i = (y * W + x) * 4;
+        if (d[i] < 200 || d[i+1] < 200 || d[i+2] < 200) {
+          cuenta++;
+          if (x < minX) minX = x; if (x > maxX) maxX = x;
+          if (y < minY) minY = y; if (y > maxY) maxY = y;
+        }
+      }
+    }
+    if (cuenta < 40 || maxX < 0) return null;
+    var m = 12;
+    minX = Math.max(0, minX - m); minY = Math.max(0, minY - m);
+    maxX = Math.min(W - 1, maxX + m); maxY = Math.min(H - 1, maxY + m);
+    var w = maxX - minX + 1, h = maxY - minY + 1;
+    var c2 = document.createElement("canvas");
+    c2.width = w; c2.height = h;
+    var x2 = c2.getContext("2d");
+    x2.fillStyle = "#ffffff";
+    x2.fillRect(0, 0, w, h);
+    x2.drawImage(canvas, minX, minY, w, h, 0, 0, w, h);
+    return { jpeg: c2.toDataURL("image/jpeg", 0.82), png: c2.toDataURL("image/png"),
+             w: w, h: h, tinta: cuenta };
+  }
+
+  /* ================= alta ================= */
+  var ULTIMO = null;
+
+  $("f").addEventListener("submit", function(ev){
+    ev.preventDefault();
+    error.textContent = "";
+    var nombre = $("nombre").value.trim();
+    var apellidos = $("apellidos").value.trim();
+    var dni = $("dni").value.trim().toUpperCase();
+    if (!nombre || !apellidos) { error.textContent = "Escriba nombre y apellidos."; return; }
+    if (!dniOk(dni)) { error.textContent = "DNI o NIE no válido (letra incorrecta o formato)."; return; }
+    var rec = recortar();
+    if (!rec) { error.textContent = "Falta la firma: dibuje su firma en el recuadro."; return; }
+
+    var ahora = new Date();
+    var horaLocal = ahora.toTimeString().slice(0, 5);
+    var isoHoy = isoLocal(ahora);                 // fecha REAL de la firma, no la de la sesión
+    var fechaFirma = fechaLarga(isoHoy);
+    var jpegBytes = b64ToBytes(rec.jpeg.split(",")[1]);
+    // se hashea el JPEG que va incrustado en el PDF: el destinatario puede recomprobarlo
+    // extrayendo la imagen con `pdfimages -j`
+    var imgSha = toHex(sha256Bytes(jpegBytes));
+
+    var canon = JSON.stringify({
+      apellidos: apellidos, curso: SESION.curso, dni: dni,
+      fecha_firma: isoHoy, fecha_sesion: SESION.fecha,
+      hora: horaLocal, img_sha256: imgSha, nombre: nombre
+    });
+    var regSha = sha256Text(canon);
+
+    var datos = {
+      nombre: nombre, apellidos: apellidos, dni: dni,
+      curso: SESION.curso, fechaLarga: fechaLarga(SESION.fecha),
+      lugar: SESION.lugar, docente: SESION.docente, modalidad: SESION.modalidad,
+      fechaHora: fechaFirma + ", " + horaLocal + " h",
+      imgSha: imgSha, regSha: regSha, canon: canon,
+      jpeg: jpegBytes, imgW: rec.w, imgH: rec.h
+    };
+
+    var pdf;
+    try { pdf = crearPDF(datos); }
+    catch (e) { error.textContent = "No se pudo generar el PDF: " + e.message; return; }
+
+    var fichero = nombreFichero(apellidos, SESION.fecha);
+    descargar(pdf, fichero);
+
+    ULTIMO = { datos: datos, fichero: fichero, pdf: pdf, png: rec.png };
+    $("recibo").innerHTML =
+      '<h2>Justificante generado</h2>' +
+      '<div class="fila"><b>Archivo:</b> ' + esc(fichero) + '</div>' +
+      '<div class="fila"><b>' + esc(nombre + " " + apellidos) + '</b> · DNI ' + esc(dni) + '</div>' +
+      '<div class="fila">' + esc(fechaFirma) + ', ' + esc(horaLocal) + ' h' +
+        (SESION.curso ? " · " + esc(SESION.curso) : "") + '</div>' +
+      '<div class="trazo"><img alt="firma" src="' + rec.png + '"></div>' +
+      '<div class="fila"><b>Huella SHA-256 del registro</b></div>' +
+      '<div class="mono">' + regSha + '</div>' +
+      '<div class="acciones">' +
+      '<button type="button" class="primario" id="otra-vez">Descargar otra vez</button>' +
+      '<button type="button" class="secundario" id="imprimir-seg">Imprimir / guardar como PDF</button>' +
+      '</div>' +
+      '<div class="nota-recibo" style="font-size:12.5px;color:#3b4655;margin-top:10px">' +
+      'Si la descarga no ha empezado, pulsa «Descargar otra vez» o «Imprimir» y elige ' +
+      '«Guardar como PDF». Después envía el archivo por WhatsApp o correo.</div>';
+    $("recibo").classList.remove("oculto");
+    $("recibo").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  });
+
+  document.addEventListener("click", function(ev){
+    var t = ev.target;
+    if (t.id === "otra-vez" && ULTIMO) descargar(ULTIMO.pdf, ULTIMO.fichero);
+    if (t.id === "imprimir-seg") window.print();
+  });
+
+  function nombreFichero(apellidos, fecha){
+    var limpio = apellidos.normalize ? apellidos.normalize("NFD").replace(/[\u0300-\u036f]/g, "") : apellidos;
+    limpio = limpio.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").toUpperCase();
+    return "Justificante-" + (fecha || "") + "-" + (limpio || "ASISTENTE") + ".pdf";
+  }
+
+  function descargar(bytesPdf, nombre){
+    var blob = new Blob([bytesPdf], { type: "application/pdf" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = nombre;
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 15000);
+  }
+
+  pintarSesion();
+
+  /* ganchos de prueba */
+  window.__app = {
+    sesion: function(){ return SESION; },
+    ultimo: function(){ return ULTIMO; },
+    crearPDF: crearPDF,
+    sha256Hex: sha256Text,
+    dniOk: dniOk,
+    fechaLarga: fechaLarga,
+    nombreFichero: nombreFichero
+  };
+})();
+</script>
+</body>
+</html>
