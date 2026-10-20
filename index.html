@@ -32,6 +32,7 @@
   .primario:disabled { opacity:.55; cursor:not-allowed; }
   .secundario { background:#fff; color:var(--azul); border:1px solid var(--linea); }
   .error { color:#8c1d1d; font-size:13px; margin-top:12px; min-height:18px; }
+  .aviso-campo { font-size:12px; color:#8a5a00; margin-top:5px; line-height:1.4; }
   .recibo { border:1px solid #b9d3bb; background:#f3f9f4; padding:16px 18px; margin-top:6px; }
   .recibo h2 { margin:0 0 10px; font-size:15px; color:#1f5b2b; }
   .recibo .fila { font-size:13.5px; margin:3px 0; }
@@ -69,7 +70,9 @@
     <div class="rejilla">
       <div><label for="nombre">Nombre</label><input id="nombre" autocomplete="given-name" required></div>
       <div><label for="apellidos">Apellidos</label><input id="apellidos" autocomplete="family-name" required></div>
-      <div class="ancho"><label for="dni">DNI / NIE</label><input id="dni" placeholder="12345678Z" autocomplete="off" required></div>
+      <div class="ancho"><label for="dni">DNI / NIE / Pasaporte</label>
+        <input id="dni" placeholder="12345678Z · X1234567L · AB1234567" autocomplete="off" required>
+        <div class="aviso-campo" id="aviso-id"></div></div>
       <div class="ancho">
         <label>Firma</label>
         <div class="caja-firma">
@@ -203,18 +206,55 @@
   function b64ToBytes(b64){ var bin = atob(b64), u = new Uint8Array(bin.length);
     for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; }
 
-  /* ================= DNI / NIE ================= */
+  /* ================= documento de identidad ================= */
+  // Aquí conviven DNI, NIE, pasaportes y documentos de otros países: NO se valida el
+  // formato español como condición para firmar. Solo se comprueba que el texto sea
+  // razonable (longitud y caracteres) y se avisa —sin bloquear— si tiene pinta de DNI
+  // o NIE y la letra no cuadra. La exactitud del número es responsabilidad de quien firma.
   var LETRAS = "TRWAGMYFPDXBNJZSQVHLCKE";
-  function dniOk(v){
-    var s = (v || "").trim().toUpperCase();
+  var RE_CONTROL = /[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g;
+
+  function limpiarTexto(v, max){
+    var s = String(v || "").replace(RE_CONTROL, "").replace(/\s+/g, " ").trim();
+    return max ? s.slice(0, max) : s;
+  }
+  function limpiarId(v){
+    return limpiarTexto(v, 24).toUpperCase();
+  }
+  function idAceptable(s){
+    if (s.length < 4 || s.length > 20) return false;
+    return /^[A-Z0-9][A-Z0-9 .\-\/]*$/.test(s);   // letras, cifras y . - / (pasaportes)
+  }
+  function letraEsperada(digitos){
+    var n = parseInt(digitos, 10);
+    return isNaN(n) ? null : LETRAS[n % 23];
+  }
+  // "" si no hay nada que avisar; si no, el motivo (nunca bloquea)
+  function avisoIdentificacion(s){
     var m = /^(\d{8})([A-Z])$/.exec(s);
-    if (m) return LETRAS[parseInt(m[1], 10) % 23] === m[2];
+    if (m) {
+      var esp = letraEsperada(m[1]);
+      return esp === m[2] ? "" : "Parece un DNI: la letra no cuadra con el número (sería " +
+             m[1] + esp + "). Revísalo; puedes continuar igualmente.";
+    }
     var n = /^([XYZ])(\d{7})([A-Z])$/.exec(s);
     if (n) {
       var d = (n[1] === "X" ? "0" : n[1] === "Y" ? "1" : "2") + n[2];
-      return LETRAS[parseInt(d, 10) % 23] === n[3];
+      var esp2 = letraEsperada(d);
+      return esp2 === n[3] ? "" : "Parece un NIE: la letra no cuadra con el número (sería " +
+             n[1] + n[2] + esp2 + "). Revísalo; puedes continuar igualmente.";
     }
-    return false;
+    return "";
+  }
+  // El PDF usa fuentes estándar en Windows-1252: fuera de eso no puede escribir.
+  function caracteresNoSoportados(s){
+    var malos = {};
+    for (var i = 0; i < s.length; i++) {
+      var ch = s.charAt(i);
+      if (ch.charCodeAt(0) < 128 || WIN[ch] !== undefined) continue;
+      malos[ch] = 1;
+    }
+    return Object.keys(malos);
   }
 
   /* ================= generador de PDF (sin librerías) ================= */
@@ -323,10 +363,10 @@
     txt(M, y, 8, "F2", "DATOS DEL ASISTENTE");
     y -= 18;
     txt(M, y, 11, "F2", "Nombre y apellidos:  ");
-    txt(M + 132, y, 11, "F1", d.apellidos + ", " + d.nombre);
+    txt(M + 150, y, 11, "F1", d.apellidos + ", " + d.nombre);
     y -= 17;
-    txt(M, y, 11, "F2", "DNI / NIE:  ");
-    txt(M + 132, y, 11, "F1", d.dni);
+    txt(M, y, 11, "F2", "DNI / NIE / Pasaporte:  ");
+    txt(M + 150, y, 11, "F1", d.dni);
 
     // recuadro de la firma
     var cajaY = y - 180, cajaH = 165, cajaW = W - 2 * M;
@@ -475,14 +515,31 @@
   /* ================= alta ================= */
   var ULTIMO = null;
 
+  var elAvisoId = $("aviso-id");
+  function refrescarAvisoId(){
+    elAvisoId.textContent = avisoIdentificacion(limpiarId($("dni").value));
+  }
+  $("dni").addEventListener("input", refrescarAvisoId);
+  $("dni").addEventListener("blur", refrescarAvisoId);
+
   $("f").addEventListener("submit", function(ev){
     ev.preventDefault();
     error.textContent = "";
-    var nombre = $("nombre").value.trim();
-    var apellidos = $("apellidos").value.trim();
-    var dni = $("dni").value.trim().toUpperCase();
+    var nombre = limpiarTexto($("nombre").value, 60);
+    var apellidos = limpiarTexto($("apellidos").value, 90);
+    var dni = limpiarId($("dni").value);
     if (!nombre || !apellidos) { error.textContent = "Escriba nombre y apellidos."; return; }
-    if (!dniOk(dni)) { error.textContent = "DNI o NIE no válido (letra incorrecta o formato)."; return; }
+    if (!idAceptable(dni)) {
+      error.textContent = "Documento de identidad: entre 4 y 20 caracteres, solo letras y cifras " +
+                          "(DNI, NIE, pasaporte o el documento de tu país).";
+      return;
+    }
+    var raros = caracteresNoSoportados(nombre + " " + apellidos);
+    if (raros.length) {
+      error.textContent = "El PDF no puede escribir estos caracteres: «" + raros.join("") +
+                          "». Escribe tu nombre con el alfabeto latino (por ejemplo, transliterado).";
+      return;
+    }
     var rec = recortar();
     if (!rec) { error.textContent = "Falta la firma: dibuje su firma en el recuadro."; return; }
 
@@ -509,7 +566,7 @@
     try { pdf = crearPDF(datos); }
     catch (e) { error.textContent = "No se pudo generar el PDF: " + e.message; return; }
 
-    var fichero = nombreFichero(apellidos, SESION.fecha);
+    var fichero = nombreFichero(apellidos, SESION.fecha, dni);
     descargar(pdf, fichero);
 
     ULTIMO = { datos: datos, fichero: fichero, pdf: pdf, png: rec.png };
@@ -539,9 +596,12 @@
     if (t.id === "imprimir-seg") window.print();
   });
 
-  function nombreFichero(apellidos, fecha){
-    var limpio = apellidos.normalize ? apellidos.normalize("NFD").replace(/[\u0300-\u036f]/g, "") : apellidos;
-    limpio = limpio.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").toUpperCase();
+  function nombreFichero(apellidos, fecha, dni){
+    var limpio = (apellidos || "").normalize
+      ? apellidos.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      : (apellidos || "");
+    limpio = limpio.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "").toUpperCase();
+    if (!limpio) limpio = String(dni || "").replace(/[^A-Za-z0-9]+/g, "").toUpperCase();
     return "Justificante-" + (fecha || "") + "-" + (limpio || "ASISTENTE") + ".pdf";
   }
 
@@ -566,7 +626,9 @@
     ultimo: function(){ return ULTIMO; },
     crearPDF: crearPDF,
     sha256Hex: sha256Text,
-    dniOk: dniOk,
+    dniOk: function(v){ return idAceptable(limpiarId(v)) && avisoIdentificacion(limpiarId(v)) === ""; },
+    idAceptable: function(v){ return idAceptable(limpiarId(v)); },
+    avisoIdentificacion: function(v){ return avisoIdentificacion(limpiarId(v)); },
     fechaLarga: fechaLarga,
     nombreFichero: nombreFichero
   };

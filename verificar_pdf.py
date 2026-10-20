@@ -64,7 +64,8 @@ def main(ruta):
     curso = seccion_curso(lineas)
     fecha_sesion_txt = buscar(r"^Fecha:\s+(.+)$")
     nombre_completo = buscar(r"^Nombre y apellidos:\s+(.+)$")
-    dni = buscar(r"^DNI / NIE:\s+(\S+)$")
+    # etiqueta actual "DNI / NIE / Pasaporte:"; los PDF antiguos llevaban "DNI / NIE:"
+    dni = buscar(r"^DNI / NIE(?: / Pasaporte)?:\s+(.+)$")
     img_impresa = buscar(r"HUELLA SHA-256 DE LA IMAGEN DE LA FIRMA\s*\n\s*([0-9a-f]{64})")
     reg_impresa = buscar(r"HUELLA SHA-256 DEL REGISTRO\s*\n\s*([0-9a-f]{64})")
 

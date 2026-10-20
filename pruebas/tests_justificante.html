@@ -77,16 +77,59 @@ async function correr(){
   chk("sin aviso ni dato de fecha de firma",
       !/Está firmando el|Firmado \(hora/i.test(d.getElementById("sesion").textContent), "");
 
-  // 3) errores
+  // 3) identificación: nada de formato español obligatorio; solo texto razonable
   var cap = null, orig = w.URL.createObjectURL;
   w.URL.createObjectURL = function(b){ cap = b; return "blob:cap"; };
+  var avisoEl = d.getElementById("aviso-id");
 
-  firmar(w, d, "María", "Muñoz Peña", "12345678A", true);
+  function probarAviso(valor){
+    d.getElementById("dni").value = valor;
+    d.getElementById("dni").dispatchEvent(new w.Event("input"));
+    return avisoEl.textContent || "";
+  }
+
+  chk("aviso vivo: DNI con letra mala",
+      /Parece un DNI/.test(probarAviso("12345678A")), probarAviso("12345678A"));
+  chk("aviso vivo: NIE con letra mala",
+      /Parece un NIE/.test(probarAviso("X0000000A")), probarAviso("X0000000A"));
+  chk("sin aviso: DNI correcto", probarAviso("12345678Z") === "", "");
+  chk("sin aviso: NIE correcto", probarAviso("Y0000001S") === "", "");
+  chk("sin aviso: pasaporte", probarAviso("AB1234567") === "", "");
+  chk("sin aviso: documento extranjero con guiones", probarAviso("PL-1234/5678") === "", "");
+
+  // documento demasiado corto -> rechazo (entrada inútil, no formato español)
+  d.getElementById("limpiar").click();
+  firmar(w, d, "María", "Muñoz Peña", "123", true);
   await esperar(120);
-  chk("rechaza DNI con letra errónea", /DNI o NIE no v.lido/.test(d.getElementById("error").textContent),
+  chk("rechaza documento demasiado corto", /Documento de identidad/.test(d.getElementById("error").textContent),
       d.getElementById("error").textContent);
-  chk("no genera PDF con DNI erróneo", cap === null, "");
+  chk("no genera PDF con documento inválido", cap === null, "");
 
+  // símbolos raros -> rechazo
+  d.getElementById("limpiar").click();
+  firmar(w, d, "María", "Muñoz Peña", "ABC$%&", true);
+  await esperar(120);
+  chk("rechaza símbolos raros", /Documento de identidad/.test(d.getElementById("error").textContent),
+      d.getElementById("error").textContent);
+
+  // nombre no latino -> rechazo explicado (el PDF usa Windows-1252)
+  d.getElementById("limpiar").click();
+  firmar(w, d, "Иван", "Petrov", "AB1234567", true);
+  await esperar(120);
+  chk("rechaza nombre que el PDF no puede escribir",
+      /no puede escribir estos caracteres/.test(d.getElementById("error").textContent),
+      d.getElementById("error").textContent);
+
+  // letra de DNI mala: AVISA pero NO bloquea
+  d.getElementById("limpiar").click();
+  probarAviso("12345678A");
+  firmar(w, d, "María", "Muñoz Peña", "12345678A", true);
+  await esperar(300);
+  chk("con letra mala se genera igualmente el PDF", cap !== null, cap ? cap.size + " B" : "sin blob");
+  chk("el aviso sigue visible bajo el campo", /Parece un DNI/.test(avisoEl.textContent), avisoEl.textContent);
+  cap = null;
+
+  // firma vacía -> rechazo
   d.getElementById("limpiar").click();
   firmar(w, d, "María", "Muñoz Peña", "12345678Z", false);
   await esperar(120);
@@ -95,7 +138,7 @@ async function correr(){
   chk("no genera PDF sin trazo", cap === null, "");
 
   // 4) caso correcto
-  firmar(w, d, "María", "Muñoz Peña", "12345678Z", true);
+  firmar(w, d, "María", "Muñoz Peña", "AB1234567", true);
   await esperar(300);
   w.URL.createObjectURL = orig;
   chk("genera el PDF", !!cap, cap ? cap.type + " " + cap.size + " B" : "sin blob");
