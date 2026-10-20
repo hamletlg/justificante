@@ -73,9 +73,9 @@ async function correr(){
   chk("cabecera con modalidad", /Modalidad/.test(d.getElementById("sesion").textContent), "");
   chk("no pide curso al alumno", !d.getElementById("curso"), "solo nombre, apellidos, DNI y firma");
 
-  // 2) aviso de fecha: la sesión es de ayer
-  chk("avisa de que firma en otra fecha", /Está firmando el/.test(d.getElementById("sesion").textContent),
-      (d.getElementById("sesion").textContent.match(/Está firmando[^.]*/) || [""])[0]);
+  // 2) el documento NO menciona cuándo se firma (la sesión puede ser de otro día)
+  chk("sin aviso ni dato de fecha de firma",
+      !/Está firmando el|Firmado \(hora/i.test(d.getElementById("sesion").textContent), "");
 
   // 3) errores
   var cap = null, orig = w.URL.createObjectURL;
@@ -108,11 +108,12 @@ async function correr(){
   chk("el fichero lleva la fecha de la sesión", u.fichero.indexOf(AYER) > -1, u.fichero);
   chk("hash del registro 64 hex", /^[0-9a-f]{64}$/.test(u.datos.regSha), u.datos.regSha);
   chk("hash de la imagen 64 hex", /^[0-9a-f]{64}$/.test(u.datos.imgSha), u.datos.imgSha);
-  chk("la firma se fecha HOY, no con la fecha de la sesión",
-      u.datos.fechaHora.indexOf(app.fechaLarga(HOY)) === 0, u.datos.fechaHora);
+  chk("los datos no llevan fecha ni hora de firma",
+      u.datos.fechaHora === undefined && !/"hora"|fecha_firma/.test(u.datos.canon), u.datos.canon);
+  chk("el recibo no muestra hora", !/\d{2}:\d{2}/.test(d.getElementById("recibo").textContent), "");
   chk("el PDF lleva la modalidad", u.datos.modalidad === "En línea", u.datos.modalidad);
-  chk("canónico con fecha_firma y fecha_sesion",
-      /"fecha_firma":"\d{4}-\d{2}-\d{2}"/.test(u.datos.canon) && /"fecha_sesion"/.test(u.datos.canon),
+  chk("canónico solo con fecha_sesion",
+      /"fecha_sesion":"\d{4}-\d{2}-\d{2}"/.test(u.datos.canon) && !/fecha_firma/.test(u.datos.canon),
       u.datos.canon);
 
   if (cap) {

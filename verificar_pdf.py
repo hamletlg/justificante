@@ -3,9 +3,9 @@
 
 Uso:  python3 verificar_pdf.py justificante.pdf
 
-Extrae el texto y la imagen del PDF, recalcula las dos huellas SHA-256 y las
-compara con las impresas en el documento. Si algo del PDF se ha editado
-(nombre, DNI, fecha, hora o la firma), no coinciden.
+Extrae el texto y recalcula el SHA-256 del registro y de la imagen incrustada, y los
+compara con las huellas impresas. Si alguien ha editado el nombre, el DNI, la fecha de
+la sesión o la firma, no coinciden.
 
 Requiere: poppler-utils (pdftotext, pdfimages).
 """
@@ -63,13 +63,12 @@ def main(ruta):
 
     curso = seccion_curso(lineas)
     fecha_sesion_txt = buscar(r"^Fecha:\s+(.+)$")
-    firmado = buscar(r"^Firmado \(hora local\):\s+(.+)$")
     nombre_completo = buscar(r"^Nombre y apellidos:\s+(.+)$")
     dni = buscar(r"^DNI / NIE:\s+(\S+)$")
     img_impresa = buscar(r"HUELLA SHA-256 DE LA IMAGEN DE LA FIRMA\s*\n\s*([0-9a-f]{64})")
     reg_impresa = buscar(r"HUELLA SHA-256 DEL REGISTRO\s*\n\s*([0-9a-f]{64})")
 
-    faltan = [n for n, v in [("curso", curso), ("fecha", fecha_sesion_txt), ("firmado", firmado),
+    faltan = [n for n, v in [("curso", curso), ("fecha", fecha_sesion_txt),
                              ("nombre", nombre_completo), ("DNI", dni),
                              ("huella de imagen", img_impresa), ("huella de registro", reg_impresa)] if not v]
     if faltan:
@@ -82,9 +81,6 @@ def main(ruta):
         return 2
     apellidos, nombre = nombre_completo.rsplit(", ", 1)
     fecha_sesion = iso_de(fecha_sesion_txt) or fecha_sesion_txt
-    fecha_firma = iso_de(firmado) or ""
-    m_hora = re.search(r"(\d{2}:\d{2})", firmado)
-    hora = m_hora.group(1) if m_hora else ""
 
     # 1) la imagen incrustada, tal cual
     tmp = tempfile.mkdtemp(prefix="verif-")
@@ -101,8 +97,7 @@ def main(ruta):
     # 2) la huella del registro, con el mismo JSON canónico que usa la app
     canon = json.dumps(
         {"apellidos": apellidos, "curso": curso, "dni": dni,
-         "fecha_firma": fecha_firma, "fecha_sesion": fecha_sesion,
-         "hora": hora, "img_sha256": img_impresa, "nombre": nombre},
+         "fecha_sesion": fecha_sesion, "img_sha256": img_impresa, "nombre": nombre},
         separators=(",", ":"), ensure_ascii=False)
     reg_real = hashlib.sha256(canon.encode("utf-8")).hexdigest()
 
@@ -110,7 +105,6 @@ def main(ruta):
     print("Curso     :", curso)
     print("Sesión    :", fecha_sesion_txt, "->", fecha_sesion)
     print("Asistente :", apellidos, "/", nombre, "/ DNI", dni)
-    print("Firmado   :", firmado, "->", fecha_firma, hora)
     print()
     print("Imagen de la firma")
     print("  impresa    :", img_impresa)
