@@ -5,6 +5,9 @@ token*.txt
 .env.*
 *askpass*
 
+# notas personales del proyecto: nunca al repositorio
+README.local.md
+
 # temporales de pruebas
 dom*.html
 *.log
