@@ -8,6 +8,9 @@ token*.txt
 # notas personales del proyecto: nunca al repositorio
 README.local.md
 
+# scripts de publicación: solo en local (llevan rutas y token de esta máquina)
+scripts/
+
 # temporales de pruebas
 dom*.html
 *.log
